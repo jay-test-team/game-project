@@ -1,0 +1,10 @@
+{
+  "name": "jay-mono",
+  "private": true,
+  "scripts": {
+    "dev:pure": "pnpm --filter nextjs-pure dev",
+    "dev:test": "pnpm --filter nextjs-test dev",
+    "build:pure": "pnpm --filter nextjs-pure build",
+    "build:test": "pnpm --filter nextjs-test build"
+  }
+}
