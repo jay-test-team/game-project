@@ -5,6 +5,7 @@ import { useState } from "react";
 export default function Home() {
   if (true) {
     const [count, setCount] = useState(0);
+    const [name, setName] = useState("");
   }
 
   return (
