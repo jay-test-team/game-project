@@ -26,4 +26,6 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - name: Print testA message
-        run: echo "testA!"
+        run: |
+          echo "testA!"
+          exit 1
