@@ -25,11 +25,77 @@ jobs:
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
-      - name: SonarQube Quality Gate Check
-        id: quality-gate
-        uses: SonarSource/sonarqube-quality-gate-action@v1
+      - name: Wait for SonarCloud processing
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          TASK_URL=$(grep "ceTaskUrl" .scannerwork/report-task.txt | cut -d'=' -f2-)
+          echo "Polling task: $TASK_URL"
+          for i in $(seq 1 30); do
+            STATUS=$(curl -s -u "$SONAR_TOKEN:" "$TASK_URL" | jq -r '.task.status')
+            echo "Attempt $i: status=$STATUS"
+            if [ "$STATUS" = "SUCCESS" ]; then
+              break
+            elif [ "$STATUS" = "FAILED" ] || [ "$STATUS" = "CANCELED" ]; then
+              echo "Task failed with status: $STATUS"
+              exit 1
+            fi
+            sleep 5
+          done
 
-      - name: Show Quality Gate Status
-        run: echo "Quality Gate status is ${{ steps.quality-gate.outputs.quality-gate-status }}"
+      - name: Post SonarCloud report to PR
+        if: github.event_name == 'pull_request'
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR_NUMBER=${{ github.event.pull_request.number }}
+          PROJECT_KEY="jay-test-team_game-project"
+          API="https://sonarcloud.io/api"
+
+          # Quality Gate status
+          QG=$(curl -s -u "$SONAR_TOKEN:" \
+            "$API/qualitygates/project_status?projectKey=$PROJECT_KEY&pullRequest=$PR_NUMBER")
+          QG_STATUS=$(echo "$QG" | jq -r '.projectStatus.status')
+
+          if [ "$QG_STATUS" = "OK" ]; then
+            QG_EMOJI="✅"
+          else
+            QG_EMOJI="❌"
+          fi
+
+          # Measures
+          MEASURES=$(curl -s -u "$SONAR_TOKEN:" \
+            "$API/measures/component?component=$PROJECT_KEY&pullRequest=$PR_NUMBER&metricKeys=new_bugs,new_vulnerabilities,new_code_smells,new_coverage,new_duplicated_lines_density,new_security_hotspots")
+
+          BUGS=$(echo "$MEASURES" | jq -r '.component.measures[] | select(.metric=="new_bugs") | .period.value // "0"')
+          VULNS=$(echo "$MEASURES" | jq -r '.component.measures[] | select(.metric=="new_vulnerabilities") | .period.value // "0"')
+          SMELLS=$(echo "$MEASURES" | jq -r '.component.measures[] | select(.metric=="new_code_smells") | .period.value // "0"')
+          COVERAGE=$(echo "$MEASURES" | jq -r '.component.measures[] | select(.metric=="new_coverage") | .period.value // "N/A"')
+          DUPLICATION=$(echo "$MEASURES" | jq -r '.component.measures[] | select(.metric=="new_duplicated_lines_density") | .period.value // "N/A"')
+          HOTSPOTS=$(echo "$MEASURES" | jq -r '.component.measures[] | select(.metric=="new_security_hotspots") | .period.value // "0"')
+
+          # Build comment body
+          BODY="## SonarCloud Analysis Report
+
+          $QG_EMOJI **Quality Gate: $QG_STATUS**
+
+          | Metric | Value |
+          |--------|-------|
+          | 🐛 Bugs | $BUGS |
+          | 🔓 Vulnerabilities | $VULNS |
+          | 🔥 Security Hotspots | $HOTSPOTS |
+          | 🧹 Code Smells | $SMELLS |
+          | 📊 Coverage | ${COVERAGE}% |
+          | 📋 Duplications | ${DUPLICATION}% |
+
+          [View full report on SonarCloud](https://sonarcloud.io/summary/new_code?id=$PROJECT_KEY&pullRequest=$PR_NUMBER)"
+
+          # Post comment to PR
+          curl -s -X POST \
+            -H "Authorization: token $GH_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n --arg body "$BODY" '{body: $body}')" \
+            "https://api.github.com/repos/${{ github.repository }}/issues/$PR_NUMBER/comments"
+
+          echo "Comment posted to PR #$PR_NUMBER"
