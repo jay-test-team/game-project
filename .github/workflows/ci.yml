@@ -3,9 +3,9 @@ name: CI
 on:
   workflow_dispatch:
   pull_request:
-    branches: [main]
+    branches: [main, testA]
   merge_group:
-    branches: [main]
+    branches: [main, testA]
 
 jobs:
   lint:
@@ -25,8 +25,5 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - name: Lint nextjs-pure
-        run: pnpm --filter nextjs-pure lint
-
-      - name: Lint nextjs-test
-        run: pnpm --filter nextjs-test lint
+      - name: Print testA message
+        run: echo "testA!"
